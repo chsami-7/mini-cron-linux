@@ -2,6 +2,7 @@
 #define TIMING_H
 
 #include <stdint.h> // uint64_t, uint32_t, uint8_t
+#include <time.h>
 
 typedef struct{
     uint64_t minutes; // 8 octets : bits 0–59 = minutes activées
@@ -22,5 +23,9 @@ Timing lire_timing(const char *chemin);
 void afficher_timing_generique(uint8_t jours, uint32_t heures, uint64_t minutes);
 
 int doit_executer(const Timing *t, const struct tm *now);
+
+int serialise_timing(int fd,const Timing *t);
+
+Timing deserialise_timing(int fd);
 
 #endif

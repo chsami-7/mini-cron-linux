@@ -132,3 +132,28 @@ int doit_executer(const Timing *t, const struct tm *now)
 
     return 1;
 }
+
+int serialise_timing(int fd_reponse, const Timing *t) {
+    uint64_t minutes = htobe64(t->minutes);
+    uint32_t heures = htobe32(t->heures);
+    uint8_t jours = t->jours;
+
+    write(fd_reponse, &minutes, 8);
+    write(fd_reponse, &heures, 4);
+    write(fd_reponse, &jours, 1);
+
+    return 0;
+}
+
+Timing deserialise_timing(int fd) {
+    Timing t = {0, 0, 0};
+    uint8_t buffer[13];
+    if (read(fd, buffer, 13) != 13) {
+        perror("Erreur lecture fichier");
+        return t;
+    }
+    t.minutes = be64toh(*(uint64_t *)buffer);
+    t.heures = be32toh(*(uint32_t *)(buffer + 8));
+    t.jours = buffer[12];
+    return t;
+}

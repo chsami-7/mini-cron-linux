@@ -42,4 +42,10 @@ Arguments lire_arguments(const char *argv_file);
 /** Libère la mémoire allouée pour les arguments */
 void liberer_arguments(Arguments *args);
 
+int serialise_command(int fd, const Command *cmd);
+
+Command deserialise_command(int fd);
+
+void afficher_command_ligne(const Command *cmd);
+
 #endif
