@@ -5,29 +5,45 @@
 #include <unistd.h>
 #include <sys/types.h>
 
-#include "tache.h"      // Contient la structure Tache
-#include "io_utils.h"   // Pour send_error, write_full
+#include "tache.h"      
+#include "io_utils.h"   
 
-// Déclaration du tableau de tâches et du compteur
+// declaration du tableau de taches et du compteur
 extern Tache taches[2048];
 extern int nb_taches;
 
-// Définitions des Opcodes
-#define OP_LIST   0x4c53
-#define OP_STDOUT 0x534f
-#define OP_STDERR 0x5345
-#define OP_TIMES  0x5458
+// definitions des codes pour chaque operation
+#define OP_LIST      0x4c53
+#define OP_CREATE    0x4352
+#define OP_COMBINE   0x4342
+#define OP_STDOUT    0x534f
+#define OP_STDERR    0x5345
+#define OP_TIMES     0x5458
+#define OP_TERMINATE 0x4b49 
+#define OP_REMOVE    0x524d
 
-/** Réponse à LIST: sérialise toutes les tâches et les envoie. */
+// serialise toutes les taches et les envoie au client
 void reponse_requete_list(int fd_reponse);
 
-/** Réponse à STDOUT / STDERR: lit et envoie le contenu du fichier d'output de la tâche. */
+// lit et envoie le contenu du fichier de sortie standard ou d'erreur
 void reponse_requete_output(int fd_req, int fd_rep, const char *tasks_dir, int is_stderr);
 
-/** Réponse à TIMES (TX): lit et envoie les logs d'exécution de la tâche. */
+// lit et envoie l'historique d'execution de la tache
 void reponse_requete_times(int fd_req, int fd_rep);
 
-/** Gère le décodage de l'opcode et dispatche la requête. */
-void handle_request(int fd_req, const char *rep_pipe, const char *tasks_dir);
+// gere la demande d'arret du demon
+int reponse_requete_terminate(int fd_req, int fd_rep, const char *tasks_dir);
+
+// gere la demande de suppression d'une tache
+void reponse_requete_remove(int fd_req, int fd_rep);
+
+// gere la creation d'une nouvelle tache simple
+void reponse_requete_create(int fd_req, int fd_rep, const char *tasks_dir);
+
+// lit l'opcode et appelle la fonction correspondante
+int handle_request(int fd_req, const char *rep_pipe, const char *tasks_dir);
+
+// recupere les arguments pour une combinaison de taches
+int recevoir_details_combine(int fd, Timing *t, uint16_t *type_com, uint32_t *nbtasks, uint64_t **ids);
 
 #endif

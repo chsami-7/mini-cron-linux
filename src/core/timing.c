@@ -8,15 +8,7 @@
 
 #include "timing.h"
 
-
-/*
- *  - Lit un fichier binaire de 13 octets représentant un timing
- *  - Le format du fichier est :
- *       [0..7]  = uint64 big-endian : masque des minutes (60 bits)
- *       [8..11] = uint32 big-endian : masque des heures  (24 bits)
- *       [12]    = uint8 : masque des jours (bits 0-6)
- *  Remplit une structure Timing avec ces valeurs décodées
- */
+// lit un fichier timing binaire et remplit la structure
 Timing lire_timing(const char *chemin) {
     Timing t = {0, 0, 0};
     int fd = open(chemin, O_RDONLY);
@@ -27,6 +19,7 @@ Timing lire_timing(const char *chemin) {
     }
 
     uint8_t buffer[13];
+    // on lit exactement 13 octets : 8 pour minutes, 4 pour heures, 1 pour jours
     if (read(fd, buffer, 13) != 13)
     {
         perror("Erreur lecture fichier");
@@ -35,6 +28,7 @@ Timing lire_timing(const char *chemin) {
     }
     close(fd);
 
+    // conversion big endian vers hote
     t.minutes = be64toh(*(uint64_t *)buffer);
     t.heures = be32toh(*(uint32_t *)(buffer + 8));
     t.jours = buffer[12];
@@ -42,6 +36,7 @@ Timing lire_timing(const char *chemin) {
     return t;
 }
 
+// fonction de debug pour afficher le timing de facon lisible
 void afficher_timing_generique(uint8_t jours, uint32_t heures, uint64_t minutes) {
     printf("=== DÉCODAGE GÉNÉRIQUE ===\n");
 
@@ -121,18 +116,23 @@ void afficher_timing_generique(uint8_t jours, uint32_t heures, uint64_t minutes)
     printf("\n");
 }
 
+// verifie si la tache doit etre executee a l'heure actuelle
 int doit_executer(const Timing *t, const struct tm *now)
 {
+    // verifie si le bit de la minute actuelle est actif
     if (!(t->minutes & (1ULL << now->tm_min)))
         return 0;
+    // verifie si le bit de l'heure actuelle est actif
     if (!(t->heures & (1U << now->tm_hour)))
         return 0;
+    // verifie si le bit du jour actuel est actif
     if (!(t->jours & (1U << now->tm_wday)))
         return 0;
 
     return 1;
 }
 
+// ecrit la structure timing dans un descripteur de fichier en big endian
 int serialise_timing(int fd_reponse, const Timing *t) {
     uint64_t minutes = htobe64(t->minutes);
     uint32_t heures = htobe32(t->heures);
@@ -145,6 +145,7 @@ int serialise_timing(int fd_reponse, const Timing *t) {
     return 0;
 }
 
+// lit la structure timing depuis un descripteur de fichier
 Timing deserialise_timing(int fd) {
     Timing t = {0, 0, 0};
     uint8_t buffer[13];
@@ -156,4 +157,44 @@ Timing deserialise_timing(int fd) {
     t.heures = be32toh(*(uint32_t *)(buffer + 8));
     t.jours = buffer[12];
     return t;
+}
+
+// convertit une chaine type '1,3-5' en masque binaire
+uint64_t parse_list_to_bitmap(const char *arg, int min_val, int max_val)
+{
+    uint64_t mask = 0;
+    if (!arg) return 0;
+    
+    char *s = strdup(arg);
+    if (!s) return 0;
+    
+    char *token = s;
+    char *end_token;
+    
+    // decoupage par virgules
+    while ((end_token = strchr(token, ',')) != NULL || *token != '\0') {
+        if (end_token) *end_token = '\0';
+        
+        char *dash = strchr(token, '-');
+        // gestion des intervalles comme 2-5
+        if (dash) {
+            *dash = '\0';
+            int start = atoi(token);
+            int end = atoi(dash + 1);
+            if (start < min_val) start = min_val;
+            if (end > max_val) end = max_val;
+            
+            for (int i = start; i <= end; i++) mask |= (1ULL << i);
+        } else {
+            // gestion des valeurs simples
+            int val = atoi(token);
+            if (val >= min_val && val <= max_val) mask |= (1ULL << val);
+        }
+        
+        if (end_token) token = end_token + 1;
+        else break;
+    }
+    
+    free(s);
+    return mask;
 }

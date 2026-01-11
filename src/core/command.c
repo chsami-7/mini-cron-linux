@@ -9,8 +9,7 @@
 
 #include "command.h"
 
-// Définitions des types de commandes
-
+// definitions des types de commandes en binaire
 #define CMD_SI ('S' << 8 | 'I')
 #define CMD_SQ ('S' << 8 | 'Q')
 #define CMD_PL ('P' << 8 | 'L')
@@ -19,7 +18,7 @@
 static const char *TYPES_COMMANDES[] = {"SI", "SQ", "PL", "IF"};
 static const int NB_TYPES = 4;
 
-/** Convertit un type de commande en sa représentation string */
+// convertit le code binaire du type en chaine lisible
 const char *type_vers_string(uint16_t type)
 {
     char type_str[3];
@@ -37,7 +36,7 @@ const char *type_vers_string(uint16_t type)
     return "??";
 }
 
-/** Lit une chaîne de caractères depuis un descripteur de fichier */
+// lit une chaine de caracteres precedee de sa taille dans le fichier
 char *lire_string(int fd)
 {
     uint32_t length;
@@ -62,7 +61,7 @@ char *lire_string(int fd)
     return str;
 }
 
-/** Lit les arguments depuis un fichier argv */
+// lit le fichier argv qui contient tous les arguments
 Arguments lire_arguments(const char *argv_file)
 {
     Arguments args = {NULL, 0};
@@ -74,6 +73,7 @@ Arguments lire_arguments(const char *argv_file)
     }
 
     uint32_t argc;
+    // lecture du nombre d'arguments
     if (read(fd, &argc, 4) != 4)
     {
         close(fd);
@@ -89,6 +89,7 @@ Arguments lire_arguments(const char *argv_file)
     }
 
     args.argc = argc;
+    // lecture de chaque argument un par un
     for (uint32_t i = 0; i < argc; i++)
     {
         args.argv[i] = lire_string(fd);
@@ -109,9 +110,7 @@ Arguments lire_arguments(const char *argv_file)
     return args;
 }
 
-/** Lit une commande depuis un répertoire */
-
-// Lit le type de commande depuis le fichier "type"
+// lit le type de commande depuis le fichier type du dossier
 static uint16_t lire_type_commande(const char *cmd_dir)
 {
     char type_path[512];
@@ -130,6 +129,7 @@ static uint16_t lire_type_commande(const char *cmd_dir)
     return be16toh(type_raw);
 }
 
+// charge une commande simple en lisant ses arguments
 static Command lire_commande_simple(const char *cmd_dir)
 {
     Command cmd = {0};
@@ -140,6 +140,7 @@ static Command lire_commande_simple(const char *cmd_dir)
     return cmd;
 }
 
+// charge une commande complexe en lisant les sous-dossiers
 static Command lire_commande_composee(const char *cmd_dir, uint16_t type)
 {
     Command cmd = {0};
@@ -153,6 +154,7 @@ static Command lire_commande_composee(const char *cmd_dir, uint16_t type)
     struct dirent *entry;
     cmd.nbcmds = 0;
 
+    // compte le nombre de sous-commandes
     while ((entry = readdir(dir)) != NULL) {
         if (isdigit(entry->d_name[0])) cmd.nbcmds++;
     }
@@ -163,6 +165,7 @@ static Command lire_commande_composee(const char *cmd_dir, uint16_t type)
     cmd.cmds = malloc(cmd.nbcmds * sizeof(Command));
     if (!cmd.cmds) { cmd.nbcmds = 0; return cmd; }
 
+    // lit chaque sous-commande recursivement
     for (uint32_t i = 0; i < cmd.nbcmds; i++) {
         char subcmd_path[512];
         snprintf(subcmd_path, sizeof(subcmd_path), "%s/%u", cmd_dir, i);
@@ -171,6 +174,7 @@ static Command lire_commande_composee(const char *cmd_dir, uint16_t type)
     return cmd;
 }
 
+// fonction principale pour charger une commande depuis le disque
 Command lire_command(const char *cmd_dir)
 {
     uint16_t type = lire_type_commande(cmd_dir);
@@ -183,7 +187,7 @@ Command lire_command(const char *cmd_dir)
 }
 
 
-
+// envoie la structure de la commande sur le reseau
 int serialise_command(int fd, const Command *cmd)
 {
     if (!cmd)
@@ -198,6 +202,7 @@ int serialise_command(int fd, const Command *cmd)
     }
     const char *type_str = type_vers_string(cmd->type);
 
+    // cas commande simple
     if (strcmp(type_str, "SI") == 0)
     {
         uint16_t type = htobe16(cmd->type);
@@ -213,6 +218,7 @@ int serialise_command(int fd, const Command *cmd)
             write(fd, cmd->args.argv[i], strlen(cmd->args.argv[i]));
         }
     }
+    // cas commande composee
     else
     {
         uint16_t type = htobe16(cmd->type);
@@ -228,6 +234,7 @@ int serialise_command(int fd, const Command *cmd)
                 return -1;
             }
         }
+        // appel recursif pour envoyer les sous-commandes
         for (uint32_t i = 0; i < cmd->nbcmds; i++)
         {
             if (cmd->cmds[i].type == 0)
@@ -242,7 +249,7 @@ int serialise_command(int fd, const Command *cmd)
 }
 
 
-
+// reconstruit une commande a partir des donnees du reseau
 Command deserialise_command(int fd)
 {
     Command cmd = {0};
@@ -255,6 +262,7 @@ Command deserialise_command(int fd)
 
     const char *type_str = type_vers_string(cmd.type);
 
+    // lecture commande simple
     if (strcmp(type_str, "SI") == 0)
     {
         uint32_t argc_raw;
@@ -285,6 +293,7 @@ Command deserialise_command(int fd)
         cmd.nbcmds = 0;
         cmd.cmds = NULL;
     }
+    // lecture commande composee
     else
     {
         uint32_t nbcmds_raw;
@@ -299,6 +308,7 @@ Command deserialise_command(int fd)
             cmd.nbcmds = 0;
             return cmd;
         }
+        // appel recursif pour lire les sous-commandes
         for (uint32_t i = 0; i < cmd.nbcmds; i++)
         {
             cmd.cmds[i] = deserialise_command(fd);
@@ -309,7 +319,7 @@ Command deserialise_command(int fd)
     return cmd;
 }
 
-/** Affiche une commande */
+// affichage detaille pour le debug
 void afficher_command(const Command *cmd)
 {
     printf("------affichage de la commande-------\n");
@@ -357,24 +367,63 @@ void afficher_command(const Command *cmd)
     }
 }
 
-void afficher_command_ligne(const Command *cmd)
-{
-    if (strcmp(type_vers_string(cmd->type), "SI") == 0) {
+// fonction recursive pour afficher la commande joliment
+static void afficher_command_recursif(const Command *cmd, int is_root) {
+    const char *type = type_vers_string(cmd->type);
+
+    if (strcmp(type, "SI") == 0) {
         for (uint32_t i = 0; i < cmd->args.argc; i++) {
-            if (i > 0){ printf(" ");}
+            if (i > 0) printf(" ");
             printf("%s", cmd->args.argv[i]);
         }
-    } else {
-        printf("( ");
+    }
+    else if (strcmp(type, "SQ") == 0 || strcmp(type, "PL") == 0) {
+        if (!is_root) printf("( ");
+        
         for (uint32_t i = 0; i < cmd->nbcmds; i++) {
-            if (i > 0){ printf(" ; ");}
-            afficher_command_ligne(&cmd->cmds[i]);
+            if (i > 0) {
+                if (strcmp(type, "SQ") == 0) printf(" ; ");
+                else printf(" | ");
+            }
+            afficher_command_recursif(&cmd->cmds[i], 0);
         }
-        printf(" )");
+        
+        if (!is_root) printf(" )");
+    }
+    else if (strcmp(type, "IF") == 0) {
+        if (!is_root) printf("( ");
+        
+        printf("if ");
+        if (cmd->nbcmds >= 1) {
+            afficher_command_recursif(&cmd->cmds[0], 0);
+            if (cmd->cmds[0].type == CMD_SI) printf(" ;");
+        }
+        
+        printf(" then ");
+        if (cmd->nbcmds >= 2) {
+            afficher_command_recursif(&cmd->cmds[1], 0);
+            if (cmd->cmds[1].type == CMD_SI) printf(" ;");
+        }
+        
+        if (cmd->nbcmds >= 3) {
+            printf(" else ");
+            afficher_command_recursif(&cmd->cmds[2], 0);
+            if (cmd->cmds[2].type == CMD_SI) printf(" ;");
+        }
+        
+        printf(" fi");
+        
+        if (!is_root) printf(" )");
     }
 }
 
-/** Libère la mémoire allouée pour les arguments */
+// point d'entree pour l'affichage propre
+void afficher_command_ligne(const Command *cmd)
+{
+    afficher_command_recursif(cmd, 1);
+}
+
+// libere toute la memoire utilisee par les arguments
 void liberer_arguments(Arguments *args)
 {
     if (args->argv)
@@ -389,7 +438,7 @@ void liberer_arguments(Arguments *args)
     args->argc = 0;
 }
 
-/** Libère la mémoire allouée pour une commande */
+// libere recursivement la memoire d'une commande
 void liberer_command(Command *cmd)
 {
     liberer_arguments(&cmd->args);

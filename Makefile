@@ -1,6 +1,6 @@
 # Compilateur && options
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -Isrc/include
+CFLAGS = -Wall -Wextra -Werror -Isrc/include -MMD -MP
 
 # Dossiers
 SRCDIR = src/core
@@ -52,11 +52,10 @@ $(BUILDDIR):
 
 clean:
 	rm -rf $(BUILDDIR)
-	rm -f erraid tadmor
 	rm -rf .sy5-2025-2026-projet-erraid-autotests.nosync
 
 distclean: clean
-	rm -f $(EXEC_PATHS)
+	rm -f erraid tadmor
 
 launch: all
 	@if [ -z "$(ARG)" ]; then \
@@ -75,3 +74,5 @@ jalon: clean all
 	./test.sh
 
 .PHONY: all clean distclean jalon
+
+-include $(wildcard $(BUILDDIR)/*.d)

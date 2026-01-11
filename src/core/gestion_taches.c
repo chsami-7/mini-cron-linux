@@ -19,21 +19,26 @@
 #include <getopt.h>
 
 #include "gestion_taches.h"
-#include "api_erraid.h"      // Pour handle_request
-#include "timing.h"           // Fonctions lire_timing, doit_executer
-#include "command.h"          // Fonctions lire_command, liberer_command
-#include "tache.h"            // Fonction executer_tache
+#include "api_erraid.h"      
+#include "timing.h"           
+#include "command.h"          
+#include "tache.h"            
 
-// Le tableau de tâches et le compteur sont externes
+// variables globales pour stocker les taches
 extern Tache taches[2048];
 extern int nb_taches;
 
+int run_in_foreground = 0;
+char *custom_pipes_dir = NULL; 
 
+
+// configure les signaux pour eviter les processus zombies
 void init_signals(void)
 {
     signal(SIGCHLD, SIG_IGN);
 }
 
+// calcule le nombre de secondes a attendre avant la prochaine minute pile
 void compute_minute_timeout(struct timeval *tv)
 {
     time_t now_t = time(NULL);
@@ -48,6 +53,7 @@ void compute_minute_timeout(struct timeval *tv)
     tv->tv_usec = 0;
 }
 
+// recupere l'heure courante arrondie a la minute
 time_t get_current_minute(struct tm *now)
 {
     time_t now_t = time(NULL);
@@ -55,6 +61,7 @@ time_t get_current_minute(struct tm *now)
     return now_t - now->tm_sec;
 }
 
+// analyse les arguments de la ligne de commande pour configurer les dossiers
 const char *get_run_directory(int argc, char **argv)
 {
     int opt;
@@ -65,15 +72,22 @@ const char *get_run_directory(int argc, char **argv)
     if (!user) user = "default";
     snprintf(default_run_dir, sizeof(default_run_dir), "/tmp/%s/erraid", user);
 
-    while ((opt = getopt(argc, argv, "r:")) != -1)
+    // gestion des options R P et F
+    while ((opt = getopt(argc, argv, "R:P:F")) != -1)
     {
         switch (opt)
         {
-        case 'r':
+        case 'R': 
             run_directory = optarg;
             break;
+        case 'P': 
+            custom_pipes_dir = optarg;
+            break;
+        case 'F':
+            run_in_foreground = 1;
+            break;
         default:
-            fprintf(stderr, "Usage: %s [-r RUN_DIRECTORY]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-R RUN_DIRECTORY] [-P PIPES_DIR] [-F]\n", argv[0]);
             exit(1);
         }
     }
@@ -82,12 +96,14 @@ const char *get_run_directory(int argc, char **argv)
     return run_directory;
 }
 
+// utilitaire pour construire des chemins de fichiers
 int make_dir_path(char *buf, size_t size, const char *base, const char *suffix)
 {
     if (snprintf(buf, size, "%s/%s", base, suffix) >= (int)size) return -1;
     return 0;
 }
 
+// cree les dossiers et les fichiers speciaux pour la communication
 void create_pipes(const char *pipes_dir, char *req_pipe, size_t req_size, char *rep_pipe, size_t rep_size)
 {
     if (mkdir(pipes_dir, 0777) == -1 && errno != EEXIST)
@@ -103,12 +119,14 @@ void create_pipes(const char *pipes_dir, char *req_pipe, size_t req_size, char *
         exit(1);
     }
 
+    // creation du tube de requete
     if (mkfifo(req_pipe, 0666) == -1 && errno != EEXIST)
     {
         perror("mkfifo req");
         exit(1);
     }
 
+    // creation du tube de reponse
     if (mkfifo(rep_pipe, 0666) == -1 && errno != EEXIST)
     {
         perror("mkfifo rep");
@@ -116,6 +134,7 @@ void create_pipes(const char *pipes_dir, char *req_pipe, size_t req_size, char *
     }
 }
 
+// charge toutes les taches presentes sur le disque au demarrage
 void load_tasks(const char *tasks_dir)
 {
     DIR *d = opendir(tasks_dir);
@@ -139,6 +158,7 @@ void load_tasks(const char *tasks_dir)
         if (stat(task_path, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
 
+        // chargement du timing
         char timing_path[2048];
         if (snprintf(timing_path, sizeof(timing_path), "%s/timing", task_path) >= (int)sizeof(timing_path))
         {
@@ -146,6 +166,7 @@ void load_tasks(const char *tasks_dir)
         }
         Timing t = lire_timing(timing_path);
 
+        // chargement de la commande
         char cmd_path[2048];
         if (snprintf(cmd_path, sizeof(cmd_path),"%s/cmd", task_path) >= (int)sizeof(cmd_path)){
             continue;
@@ -154,6 +175,7 @@ void load_tasks(const char *tasks_dir)
         if (c.type == 0)
             continue;
 
+        // ajout dans le tableau en memoire
         taches[nb_taches].id = atoi(entry->d_name);
         taches[nb_taches].timing = t;
         taches[nb_taches].cmd = c;
@@ -168,6 +190,7 @@ void load_tasks(const char *tasks_dir)
     closedir(d);
 }
 
+// boucle principale du serveur qui attend les evenements
 void server_loop(int fd_req, const char *rep_pipe, const char *tasks_dir)
 {
     while (1)
@@ -179,16 +202,17 @@ void server_loop(int fd_req, const char *rep_pipe, const char *tasks_dir)
         FD_ZERO(&readfds);
         FD_SET(fd_req, &readfds);
 
+        // attente passive jusqu'a une requete ou le timeout
         int ret = select(fd_req + 1, &readfds, NULL, NULL, &tv);
 
-        // Traitement des requêtes (utilisant la fonction exportée par api_serveur.c)
+        // si on recoit une requete on la traite
         if (ret > 0 && FD_ISSET(fd_req, &readfds))
         {
             handle_request(fd_req, rep_pipe, tasks_dir);
             continue;
         }
 
-        // Planification des tâches
+        // verification des taches a lancer a chaque minute
         struct tm now;
         time_t minute_actuelle = get_current_minute(&now);
 
